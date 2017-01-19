@@ -6,48 +6,42 @@ import java.util.Queue;
  */
 public class BucketBarrier implements Bucket, Drop {
 
-    private Queue<Thread> threads = new ArrayDeque<>();
+    private final Queue<Thread> threads = new ArrayDeque<>();
 
-    private volatile Integer numberOfDropsToWait = 0; //changes only inside synchronized(threads) block
+    private int numberOfDropsToWait = 0; //changes only inside synchronized(threads) block
 
-    private Object leakMutex = new Object();
-    private volatile Integer numberOfTasksWaitingForLeakMutex = 0; //changes only inside synchronized(leakMutex) block
+    private final Object leakMutex = new Object();
+    private int numberOfTasksWaitingForLeakMutex = 0; //changes only inside synchronized(leakMutex) block
 
-    private Object leakingInProgress = new Object();
-    private volatile Boolean controllerWaitingForLIPMutex = true; //changes only inside synchronized(LIP) block
+    private final Object leakingInProgress = new Object();
+    private boolean controllerWaitingForLIPMutex = true; //changes only inside synchronized(LIP) block
 
     @Override
     public void arrived() throws InterruptedException {
         synchronized (threads)
         {
+            System.out.println(Thread.currentThread().getName() + " entered thread block");
             threads.add(Thread.currentThread());
-        }
-
-        synchronized (threads)
-        {
             numberOfDropsToWait--;
             threads.notifyAll();
             do
             {
                 threads.wait();
             } while (threads.peek() != Thread.currentThread());
+            System.out.println(Thread.currentThread().getName() + " left thread block");
         }
 
 
         synchronized (leakMutex) {
+            System.out.println(Thread.currentThread().getName() + " entered leakMutex block");
             numberOfTasksWaitingForLeakMutex++;
             leakMutex.notify();
             leakMutex.wait();
-            numberOfTasksWaitingForLeakMutex--;
+            System.out.println(Thread.currentThread().getName() + " left leakMutex block");
         }
 
 
-        synchronized (leakingInProgress)
-        {
 
-            controllerWaitingForLIPMutex = false;
-            leakingInProgress.notify();
-        }
 
 
     }
@@ -66,38 +60,25 @@ public class BucketBarrier implements Bucket, Drop {
 
     @Override
     public void leak() throws InterruptedException {
-        synchronized (threads)
-        {
-            threads.notifyAll();
-        }
 
         synchronized (leakMutex)
         {
+            System.out.println(Thread.currentThread().getName() + " entered leakMutex block. counter =" +  numberOfTasksWaitingForLeakMutex);
             while (numberOfTasksWaitingForLeakMutex == 0)
             {
                 leakMutex.wait();
             }
-            leakMutex.notify();
+            leakMutex.notifyAll();
+            numberOfTasksWaitingForLeakMutex--;
+            System.out.println(Thread.currentThread().getName() + " left leakMutex block");
         }
 
         synchronized (threads)
         {
+            System.out.println(Thread.currentThread().getName() + " entered thread block");
             threads.poll();
-        }
-
-
-        synchronized (leakingInProgress)
-        {
-
-            while (controllerWaitingForLIPMutex)
-            {
-
-                leakingInProgress.wait();
-
-            }
-
-            controllerWaitingForLIPMutex = true;
-
+            threads.notifyAll();
+            System.out.println(Thread.currentThread().getName() + " left thread block");
         }
 
     }
